@@ -1,18 +1,14 @@
 import pygame
 import pandas as pd
 import matplotlib.pyplot as plt
-from random import randint
+from random import randint, choice
 import numpy as np
 import time
-from collections import defaultdict
 
-MAX_PLANTS = 10
+MAX_PLANTS = 5
 
-
-def is_close_to(val1, val2, tolerance):
-    """Check if two values are within a certain distance."""
-    return abs(val1 - val2) < tolerance
-
+# Weather conditions that can influence plant health
+WEATHER_CONDITIONS = ['Sunny', 'Cloudy', 'Rainy']
 
 def initialize_plot():
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 15))
@@ -34,7 +30,6 @@ def initialize_plot():
     plt.tight_layout()
     return fig, ax1, ax2, ax3
 
-
 def update_plot(health_records, growth_records, reward_records, fig, ax1, ax2, ax3):
     ax1.plot(range(1, len(health_records) + 1), health_records, label='Health', marker='o')
     ax2.plot(range(1, len(growth_records) + 1), growth_records, label='Growth', marker='x')
@@ -47,7 +42,6 @@ def update_plot(health_records, growth_records, reward_records, fig, ax1, ax2, a
     fig.canvas.draw()
     fig.canvas.flush_events()
 
-
 def save_and_plot_data(health_records, growth_records, reward_records):
     data = pd.DataFrame({
         'Interval': range(1, len(health_records) + 1),
@@ -57,14 +51,9 @@ def save_and_plot_data(health_records, growth_records, reward_records):
     })
     data.to_csv('garden_simulation_data.csv', index=False)
 
-
 def update_parameters(config, action):
     """Update garden conditions based on the agent's actions."""
-    watering, fertilizing, pruning = action
-    config['watering'] += watering
-    config['fertilizing'] += fertilizing
-    config['pruning'] += pruning
-
+    config['watering'] += action[0]  # Control only watering
 
 class Plant:
     def __init__(self):
@@ -73,22 +62,54 @@ class Plant:
         self.fertilizer = 0
         self.health = 5
         self.growth = 0
+        self.moisture_level = 5  # New factor
+        self.nitrogen_level = 5   # New factor
+        self.chlorophyll_index = 5 # New factor
+        self.weather = choice(WEATHER_CONDITIONS)  # Random initial weather
 
     def update(self, action):
-
+        # Water control only
         self.water = min(self.water + action[0], 10)
-        self.fertilizer = min(self.fertilizer + action[1], 10)
-        self.health = min(self.health + action[2], 10)
 
-        if self.water > 3 and self.fertilizer > 1:
+        # Health decrease for too much or too little water
+        if self.water > 7 and self.nitrogen_level > 1:  # Too much water
+            self.health = max(self.health - 0.5, 0)
+            self.chlorophyll_index = max(self.chlorophyll_index - 0.5, 0)
+        elif self.water < 3 or self.nitrogen_level < 1:  # Too little water
+            self.health = max(self.health - 0.5, 0)
+            self.chlorophyll_index = max(self.chlorophyll_index - 0.5, 0)
+
+        # Update growth based on moisture, nitrogen, and weather
+        if self.water > 3 and self.nitrogen_level > 1 and self.chlorophyll_index > 3:
             self.growth = min(self.growth + 0.5, 10)
         else:
             self.health = max(self.health - 0.5, 0)
+            self.chlorophyll_index = max(self.chlorophyll_index - 0.5, 0)
+
+        # Weather influence on health
+        if self.weather == 'Sunny':
+            self.water = min(self.water - 0.1, 10)
+            self.chlorophyll_index += 0.5
+        elif self.weather == 'Rainy':
+            self.water = min(self.water + 0.5, 10)
+        elif self.weather == 'Cloudy':
+            self.health = max(self.health - 1, 0)
+
+        self.chlorophyll_index -= 0.1
+        self.water -= 0.1
 
     def render(self, screen, x, y):
-        color = (0, 255, 0) if self.health > 5 else (255, 0, 0)
+        if self.health > 5:
+            color = (0, 255, 0)
+        elif self.health > 3:
+            color = (255, 150, 0)
+        else:
+            color = (255, 0, 0)
         pygame.draw.circle(screen, color, (x, y), int(self.health * 5))
 
+    def update_weather(self):
+        """Randomly change the weather every hour (simulation)."""
+        self.weather = choice(WEATHER_CONDITIONS)
 
 def run_simulation(config, agent):
     pygame.init()
@@ -111,16 +132,21 @@ def run_simulation(config, agent):
         current_time = pygame.time.get_ticks()
         elapsed_time = current_time - start_time
 
-        if elapsed_time > 45000:
+        if elapsed_time > 10000:  # Run simulation for 10 seconds (equivalent to 10 hours)
             running = False
 
-        state = np.array([plant.health for plant in plants] + [plant.growth for plant in plants])
+        state = np.array([plant.health for plant in plants] +
+                         [plant.growth for plant in plants] +
+                         [plant.moisture_level for plant in plants] +
+                         [plant.nitrogen_level for plant in plants] +
+                         [plant.chlorophyll_index for plant in plants])
         action = agent.select_action(state)
         update_parameters(config, action)
 
         screen.fill((255, 255, 255))
         for i, plant in enumerate(plants):
             plant.update(action)
+            plant.update_weather()  # Update weather condition
             plant.render(screen, 100 + i * 100, 300)
 
         total_health = sum(plant.health for plant in plants) / MAX_PLANTS
@@ -139,19 +165,17 @@ def run_simulation(config, agent):
                 running = False
 
         pygame.display.flip()
-        clock.tick(30)
+        clock.tick(30)  # 30 FPS
         interval_count += 1
 
     pygame.quit()
     save_and_plot_data(health_records, growth_records, reward_records)
 
-
 class DummyAgent:
     def select_action(self, state):
-        return [randint(-1, 1) for _ in range(3)]
+        return [randint(-2, 2)]  # Control only watering
 
-
-config = {'watering': 0, 'fertilizing': 0, 'pruning': 0}
+config = {'watering': 0}
 agent = DummyAgent()
 
 run_simulation(config, agent)
