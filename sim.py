@@ -42,7 +42,6 @@ def update_plot(health_records, growth_records, reward_records, fig, ax1, ax2, a
     fig.canvas.draw()
     fig.canvas.flush_events()
 
-
 def save_and_plot_data(health_records, growth_records, reward_records):
     data = pd.DataFrame({
         'Interval': range(1, len(health_records) + 1),
