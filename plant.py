@@ -1,33 +1,42 @@
 from random import randint, choice
-from env import WEATHER_CONDITIONS
+
+import numpy as np
 import pygame
 
-class Plant:
+class PlantEnv:
     def __init__(self):
         self.water = 5
         self.health = 5
-        self.moisture_level = 5  # New factor
-        self.weather = choice(WEATHER_CONDITIONS)  # Random initial weather
+        self.moisture_level = 5
 
-    def update(self, action):
+    def reset(self):
+        self.water = 5
+        self.health = 5
+        self.moisture_level = 5
+
+    def step(self, action):
+        # Store the previous health to calculate the difference
+        previous_health = self.health
+
         # Water control only
-        self.water = min(self.water + action[0], 10)
+        self.moisture_level = min(self.moisture_level + action[0], 10)
+        self.water += self.moisture_level * 0.1
 
         # Health decrease for too much or too little water
         if self.water > 7:  # Too much water
             self.health = max(self.health - 0.5, 0)
-        elif self.water < 3:  # Too little water
+        elif self.water < 4:  # Too little water
             self.health = max(self.health - 0.5, 0)
         else:
             self.health = max(self.health + 0.5, 0)
 
-        # Weather influence on health
-        if self.weather == 'Sunny':
-            self.water = min(self.water - 0.1, 10)
-        elif self.weather == 'Rainy':
-            self.water = min(self.water + 0.5, 10)
-        elif self.weather == 'Cloudy':
-            self.health = max(self.health - 1, 0)
+        # Updates in the environment after each update
+        self.water -= 0.5
+        self.moisture_level -= 0.5
+
+        # Calculate the reward based on the change in health
+        reward = self.health - previous_health
+        return self.get_state(), reward
 
     def render(self, screen, x, y):
         if self.health > 5:
@@ -38,6 +47,8 @@ class Plant:
             color = (255, 0, 0)
         pygame.draw.circle(screen, color, (x, y), int(25))
 
-    def update_weather(self):
-        """Randomly change the weather every hour (simulation)."""
-        self.weather = choice(WEATHER_CONDITIONS)
+    def get_state(self):
+        return np.array([
+            self.moisture_level,
+            self.water
+        ])

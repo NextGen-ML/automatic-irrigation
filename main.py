@@ -1,112 +1,201 @@
 import pygame
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from random import randint, choice
-import numpy as np
-import time
-from plant import Plant
-from agent import DummyAgent
-from env import WEATHER_CONDITIONS
+from collections import deque
+import torch
+from plant import PlantEnv
+from agent import Agent
 
-MAX_PLANTS = 5
-
-def initialize_plot():
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 15))
-    ax1.set_xlabel('Interval')
-    ax1.set_ylabel('Plant Health')
-    ax1.set_title('Plant Health Over Time')
-    ax1.grid(True)
-
-    ax2.set_xlabel('Interval')
-    ax2.set_ylabel('Rewards')
-    ax2.set_title('Rewards Over Time')
-    ax2.grid(True)
-
-    plt.tight_layout()
-    return fig, ax1, ax2
-
-def update_plot(health_records, reward_records, fig, ax1, ax2):
-    ax1.plot(range(1, len(health_records) + 1), health_records, label='Health', marker='o')
-    ax2.plot(range(1, len(reward_records) + 1), reward_records, label='Rewards', marker='s')
-
-    for ax in (ax1, ax2):
-        ax.relim()
-        ax.autoscale_view()
-
-    fig.canvas.draw()
-    fig.canvas.flush_events()
-
-
-def save_and_plot_data(health_records, reward_records):
-    data = pd.DataFrame({
-        'Interval': range(1, len(health_records) + 1),
-        'Health': health_records,
-        'Rewards': reward_records
-    })
-    data.to_csv('garden_simulation_data.csv', index=False)
-
-def update_parameters(config, action):
-    """Update garden conditions based on the agent's actions."""
-    config['watering'] += action[0]  # Control only watering
-
-
-def run_simulation(config, agent):
+def train_agent(episodes=500, max_steps=20):
     pygame.init()
     screen = pygame.display.set_mode((800, 600))
-    pygame.display.set_caption('Garden Simulation')
+    pygame.display.set_caption('Plant DQN Training')
     clock = pygame.time.Clock()
-    running = True
-    start_time = pygame.time.get_ticks()
 
-    fig, ax1, ax2 = initialize_plot()
+    # Initialize plot
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 15))
+    plt.ion()  # Interactive mode for live updates
 
-    plants = [Plant() for _ in range(MAX_PLANTS)]
-    interval_count = 0
-    total_reward = 0
-    health_records = []
-    growth_records = []
-    reward_records = []
+    # Initialize tracking metrics
+    episode_rewards = []
+    average_rewards = []
+    epsilon_history = []
+    loss_history = []
 
-    while running:
-        current_time = pygame.time.get_ticks()
-        elapsed_time = current_time - start_time
+    # Initialize environment and agent
+    env = PlantEnv()
+    state_size = len(env.get_state())
+    action_size = 5
+    agent = Agent(state_size=state_size, action_size=action_size)
 
-        if elapsed_time > 10000:  # Run simulation for 10 seconds (equivalent to 10 hours)
-            running = False
+    for episode in range(episodes):
+        env.reset()
+        episode_reward = 0
+        losses = []
 
-        state = np.array([plant.health for plant in plants] +
-                         [plant.moisture_level for plant in plants])
-        action = agent.select_action(state)
-        update_parameters(config, action)
+        for step in range(max_steps):
+            # Handle PyGame events
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    return
 
-        screen.fill((255, 255, 255))
-        for i, plant in enumerate(plants):
-            plant.update(action)
-            plant.update_weather()  # Update weather condition
-            plant.render(screen, 100 + i * 100, 300)
+            # Get current state
+            state = env.get_state()
 
-        total_health = sum(plant.health for plant in plants) / MAX_PLANTS
-        reward = total_health
-        total_reward += reward
+            # Select action
+            action = agent.act(state)
 
-        health_records.append(total_health)
-        reward_records.append(reward)
+            # Take action in environment
+            next_state, reward = env.step(action)
 
-        update_plot(health_records, reward_records, fig, ax1, ax2)
+            # Store experience
+            agent.remember(state, action, reward, next_state)
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                running = False
+            # Learn from experience
+            if len(agent.memory) >= agent.batch_size:
+                loss = agent.replay()
+                if loss is not None:
+                    losses.append(loss)
 
-        pygame.display.flip()
-        clock.tick(30)  # 30 FPS
-        interval_count += 1
+            episode_reward += reward
+
+            # Render environment
+            screen.fill((255, 255, 255))
+            env.render(screen, 400, 300)
+
+            # Display training info on screen
+            font = pygame.font.Font(None, 36)
+            text = font.render(f'Episode: {episode + 1}', True, (0, 0, 0))
+            screen.blit(text, (10, 10))
+            text = font.render(f'Step: {step + 1}', True, (0, 0, 0))
+            screen.blit(text, (10, 50))
+            text = font.render(f'Epsilon: {agent.epsilon:.3f}', True, (0, 0, 0))
+            screen.blit(text, (10, 90))
+
+            pygame.display.flip()
+            clock.tick(30)  # 30 FPS
+
+        # Record metrics
+        episode_rewards.append(episode_reward)
+        average_rewards.append(np.mean(episode_rewards[-100:]))
+        epsilon_history.append(agent.epsilon)
+        if losses:
+            loss_history.append(np.mean(losses))
+        else:
+            loss_history.append(0)
+
+        # Update plots every 10 episodes
+        if episode % 10 == 0:
+            ax1.clear()
+            ax1.plot(episode_rewards, label='Episode Reward')
+            ax1.plot(average_rewards, label='100-Episode Average')
+            ax1.set_xlabel('Episode')
+            ax1.set_ylabel('Reward')
+            ax1.set_title('Training Rewards')
+            ax1.legend()
+            ax1.grid(True)
+
+            ax2.clear()
+            ax2.plot(epsilon_history)
+            ax2.set_xlabel('Episode')
+            ax2.set_ylabel('Epsilon')
+            ax2.set_title('Exploration Rate')
+            ax2.grid(True)
+
+            ax3.clear()
+            ax3.plot(loss_history)
+            ax3.set_xlabel('Episode')
+            ax3.set_ylabel('Loss')
+            ax3.set_title('Training Loss')
+            ax3.grid(True)
+
+            plt.tight_layout()
+            plt.pause(0.01)
+
+        # Print progress
+        if episode % 50 == 0:
+            print(f"Episode: {episode}")
+            print(f"Average Reward: {average_rewards[-1]:.2f}")
+            print(f"Epsilon: {agent.epsilon:.3f}")
+            print(f"Memory size: {len(agent.memory)}")
+            print("------------------------")
+
+    # Save training data
+    training_data = pd.DataFrame({
+        'Episode': range(episodes),
+        'Reward': episode_rewards,
+        'Average_Reward': average_rewards,
+        'Epsilon': epsilon_history,
+        'Loss': loss_history
+    })
+    training_data.to_csv('training_results.csv', index=False)
 
     pygame.quit()
-    save_and_plot_data(health_records, reward_records)
+    return agent, training_data
 
 
-config = {'watering': 0}
-agent = DummyAgent()
+def test_agent(agent, episodes=10):
+    """Test the trained agent"""
+    pygame.init()
+    screen = pygame.display.set_mode((800, 600))
+    pygame.display.set_caption('Plant DQN Testing')
+    clock = pygame.time.Clock()
 
-run_simulation(config, agent)
+    env = PlantEnv()
+    test_rewards = []
+
+    for episode in range(episodes):
+        env.reset()
+        episode_reward = 0
+        done = False
+
+        while not done:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    return
+
+            state = env.get_state()
+
+            # Use greedy action selection during testing
+            with torch.no_grad():
+                state_tensor = torch.FloatTensor(state).unsqueeze(0)
+                q_values = agent.policy_net(state_tensor)
+                action_idx = q_values.argmax().item()
+                action = np.array([agent.action_map[action_idx]])
+
+            next_state, reward = env.step(action)
+            episode_reward += reward
+
+            # Render
+            screen.fill((255, 255, 255))
+            env.render(screen, 400, 300)
+
+            font = pygame.font.Font(None, 36)
+            text = font.render(f'Test Episode: {episode + 1}', True, (0, 0, 0))
+            screen.blit(text, (10, 10))
+            text = font.render(f'Reward: {episode_reward:.2f}', True, (0, 0, 0))
+            screen.blit(text, (10, 50))
+
+            pygame.display.flip()
+            clock.tick(30)
+
+            if env.health <= 0:
+                done = True
+
+        test_rewards.append(episode_reward)
+        print(f"Test Episode {episode + 1}: Reward = {episode_reward:.2f}")
+
+    pygame.quit()
+    return np.mean(test_rewards)
+
+
+if __name__ == "__main__":
+    # Train the agent
+    trained_agent, training_data = train_agent(episodes=500)
+
+    # Test the trained agent
+    average_test_reward = test_agent(trained_agent)
+    print(f"\nAverage Test Reward: {average_test_reward:.2f}")
