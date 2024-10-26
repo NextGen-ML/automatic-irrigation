@@ -9,9 +9,9 @@ import random
 class DQN(nn.Module):
     def __init__(self, state_size, action_size):
         super(DQN, self).__init__()
-        self.fc1 = nn.Linear(state_size, 26)
-        self.fc2 = nn.Linear(26, 26)
-        self.fc3 = nn.Linear(26, action_size)
+        self.fc1 = nn.Linear(state_size, 32)
+        self.fc2 = nn.Linear(32, 32)
+        self.fc3 = nn.Linear(32, action_size)
 
     def forward(self, x):
         x = torch.relu(self.fc1(x))
@@ -30,7 +30,7 @@ class Agent:
         self.epsilon_min = 0.01
         self.epsilon_decay = 0.999
         self.learning_rate = 0.001
-        self.tau = 0.1
+        self.tau = 0.01
 
         self.policy_net = DQN(state_size, action_size)
         self.target_net = DQN(state_size, action_size)
@@ -38,7 +38,7 @@ class Agent:
 
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=self.learning_rate)
 
-        self.action_map = np.linspace(0, 10, action_size)
+        self.action_map = np.linspace(0, 2, action_size)
 
     def remember(self, state, action, reward, next_state):
         self.memory.append((state, action, reward, next_state))
@@ -53,20 +53,20 @@ class Agent:
                 discrete_action = q_values.argmax().item()
 
         # Convert discrete action to continuous water amount
-        print(np.array([self.action_map[discrete_action]]))
         return np.array([self.action_map[discrete_action]])
 
     def replay(self):
         if len(self.memory) < self.batch_size:
             return
 
-        print("replaying")
         # Sample minibatch
         minibatch = random.sample(self.memory, self.batch_size)
         states, actions, rewards, next_states = zip(*minibatch)
 
         # Convert to tensors
-        states = torch.FloatTensor(states)
+        states_np = np.array(states)
+        states = torch.FloatTensor(states_np)
+
         actions = torch.LongTensor([np.where(self.action_map == action[0])[0][0]
                                     for action in actions])
         rewards = torch.FloatTensor(rewards)
@@ -83,7 +83,7 @@ class Agent:
         target_q_values = rewards + self.gamma * next_q_values
 
         # Compute loss
-        loss = nn.MSELoss()(current_q_values, target_q_values)
+        loss = nn.MSELoss()(current_q_values.squeeze(), target_q_values)
 
         # Optimize the model
         self.optimizer.zero_grad()
@@ -91,7 +91,7 @@ class Agent:
         self.optimizer.step()
 
         # Soft update target network
-        self._update_target_network()
+        self.update_target_network()
 
         # Decay epsilon
         if self.epsilon > self.epsilon_min:
@@ -99,7 +99,7 @@ class Agent:
 
         return loss.item()
 
-    def _update_target_network(self):
+    def update_target_network(self):
         """Soft update model parameters: θ_target = τ*θ_local + (1 - τ)*θ_target"""
         for target_param, policy_param in zip(self.target_net.parameters(),
                                               self.policy_net.parameters()):

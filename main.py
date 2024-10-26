@@ -2,19 +2,26 @@ import pygame
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from collections import deque
 import torch
 from plant import PlantEnv
 from agent import Agent
+import random
 
-def train_agent(episodes=500, max_steps=20):
+def train_agent(episodes=1000, max_steps=25, seed=42):
+    # Set the random seed for reproducibility
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
     pygame.init()
     screen = pygame.display.set_mode((800, 600))
     pygame.display.set_caption('Plant DQN Training')
     clock = pygame.time.Clock()
 
     # Initialize plot
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 15))
+    fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(10, 20))
     plt.ion()  # Interactive mode for live updates
 
     # Initialize tracking metrics
@@ -22,6 +29,7 @@ def train_agent(episodes=500, max_steps=20):
     average_rewards = []
     epsilon_history = []
     loss_history = []
+    water_usage_history = []  # New list to store water usage
 
     # Initialize environment and agent
     env = PlantEnv()
@@ -32,6 +40,7 @@ def train_agent(episodes=500, max_steps=20):
     for episode in range(episodes):
         env.reset()
         episode_reward = 0
+        episode_water_usage = 0  # Track water use per episode
         losses = []
 
         for step in range(max_steps):
@@ -47,8 +56,9 @@ def train_agent(episodes=500, max_steps=20):
             # Select action
             action = agent.act(state)
 
-            # Take action in environment
-            next_state, reward = env.step(action)
+            # Take action in environment and track water use
+            next_state, reward, water_used = env.step(action)  # Ensure env.step() returns water_used
+            episode_water_usage += water_used  # Add water use for this step
 
             # Store experience
             agent.remember(state, action, reward, next_state)
@@ -81,6 +91,7 @@ def train_agent(episodes=500, max_steps=20):
         episode_rewards.append(episode_reward)
         average_rewards.append(np.mean(episode_rewards[-100:]))
         epsilon_history.append(agent.epsilon)
+        water_usage_history.append(episode_water_usage)  # Record total water usage for the episode
         if losses:
             loss_history.append(np.mean(losses))
         else:
@@ -111,16 +122,15 @@ def train_agent(episodes=500, max_steps=20):
             ax3.set_title('Training Loss')
             ax3.grid(True)
 
+            ax4.clear()
+            ax4.plot(water_usage_history)
+            ax4.set_xlabel('Episode')
+            ax4.set_ylabel('Water Usage')
+            ax4.set_title('Water Usage per Episode')
+            ax4.grid(True)
+
             plt.tight_layout()
             plt.pause(0.01)
-
-        # Print progress
-        if episode % 50 == 0:
-            print(f"Episode: {episode}")
-            print(f"Average Reward: {average_rewards[-1]:.2f}")
-            print(f"Epsilon: {agent.epsilon:.3f}")
-            print(f"Memory size: {len(agent.memory)}")
-            print("------------------------")
 
     # Save training data
     training_data = pd.DataFrame({
@@ -128,7 +138,8 @@ def train_agent(episodes=500, max_steps=20):
         'Reward': episode_rewards,
         'Average_Reward': average_rewards,
         'Epsilon': epsilon_history,
-        'Loss': loss_history
+        'Loss': loss_history,
+        'Water_Usage': water_usage_history  # Include water usage in saved data
     })
     training_data.to_csv('training_results.csv', index=False)
 
@@ -186,7 +197,7 @@ def test_agent(agent, episodes=10):
                 done = True
 
         test_rewards.append(episode_reward)
-        print(f"Test Episode {episode + 1}: Reward = {episode_reward:.2f}")
+        # print(f"Test Episode {episode + 1}: Reward = {episode_reward:.2f}")
 
     pygame.quit()
     return np.mean(test_rewards)
@@ -194,8 +205,8 @@ def test_agent(agent, episodes=10):
 
 if __name__ == "__main__":
     # Train the agent
-    trained_agent, training_data = train_agent(episodes=500)
+    trained_agent, training_data = train_agent(episodes=1000)
 
     # Test the trained agent
     average_test_reward = test_agent(trained_agent)
-    print(f"\nAverage Test Reward: {average_test_reward:.2f}")
+    # print(f"\nAverage Test Reward: {average_test_reward:.2f}")
