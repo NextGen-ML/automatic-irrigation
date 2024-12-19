@@ -7,7 +7,17 @@ from plant import PlantEnv
 from agent import Agent
 import random
 
-def train_agent(episodes=1000, max_steps=25, seed=42):
+def train_agent(episodes, max_steps=25, seed=42):
+    # Clear previous training results
+    open('training_results.csv', 'w').close()
+    open('weather_actions.csv', 'w').close()
+
+    # Write headers for the CSV files
+    training_results_header = pd.DataFrame(columns=['Episode', 'Reward', 'Average_Reward', 'Epsilon', 'Loss', 'Water_Usage'])
+    weather_actions_header = pd.DataFrame(columns=['Episode', 'Step', 'Weather_Prediction_Day1', 'Weather_Prediction_Day2', 'Weather_Prediction_Day3', 'Action'])
+    training_results_header.to_csv('training_results.csv', index=False)
+    weather_actions_header.to_csv('weather_actions.csv', index=False)
+
     # Set the random seed for reproducibility
     random.seed(seed)
     np.random.seed(seed)
@@ -22,14 +32,14 @@ def train_agent(episodes=1000, max_steps=25, seed=42):
 
     # Initialize plot
     fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(10, 20))
-    plt.ion()  # Interactive mode for live updates
+    plt.ion()
 
     # Initialize tracking metrics
     episode_rewards = []
     average_rewards = []
     epsilon_history = []
     loss_history = []
-    water_usage_history = []  # New list to store water usage
+    water_usage_history = []
 
     # Initialize environment and agent
     env = PlantEnv()
@@ -37,33 +47,32 @@ def train_agent(episodes=1000, max_steps=25, seed=42):
     action_size = 5
     agent = Agent(state_size=state_size, action_size=action_size)
 
+    # Define a mapping for weather conditions
+    weather_mapping = {
+        "Sunny": -1,
+        "Cloudy": -0.5,
+        "Rainy": 0.5
+    }
+
     for episode in range(episodes):
         env.reset()
         episode_reward = 0
-        episode_water_usage = 0  # Track water use per episode
+        episode_water_usage = 0
         losses = []
+        weather_actions_data = []  # Reset per episode
 
         for step in range(max_steps):
-            # Handle PyGame events
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     pygame.quit()
                     return
 
-            # Get current state
             state = env.get_state()
-
-            # Select action
             action = agent.act(state)
-
-            # Take action in environment and track water use
-            next_state, reward, water_used = env.step(action)  # Ensure env.step() returns water_used
-            episode_water_usage += water_used  # Add water use for this step
-
-            # Store experience
+            next_state, reward, water_used = env.step(action)
+            episode_water_usage += water_used
             agent.remember(state, action, reward, next_state)
 
-            # Learn from experience
             if len(agent.memory) >= agent.batch_size:
                 loss = agent.replay()
                 if loss is not None:
@@ -71,11 +80,19 @@ def train_agent(episodes=1000, max_steps=25, seed=42):
 
             episode_reward += reward
 
-            # Render environment
+            # Collect weather prediction and action for saving
+            weather_actions_data.append({
+                "Episode": episode,
+                "Step": step,
+                "Weather_Prediction_Day1": weather_mapping.get(env.predicted_weather[0], None) if len(env.predicted_weather) > 0 else None,
+                "Weather_Prediction_Day2": weather_mapping.get(env.predicted_weather[1], None) if len(env.predicted_weather) > 1 else None,
+                "Weather_Prediction_Day3": weather_mapping.get(env.predicted_weather[2], None) if len(env.predicted_weather) > 2 else None,
+                "Action": action[0]
+            })
+
             screen.fill((255, 255, 255))
             env.render(screen, 400, 300)
 
-            # Display training info on screen
             font = pygame.font.Font(None, 36)
             text = font.render(f'Episode: {episode + 1}', True, (0, 0, 0))
             screen.blit(text, (10, 10))
@@ -85,19 +102,29 @@ def train_agent(episodes=1000, max_steps=25, seed=42):
             screen.blit(text, (10, 90))
 
             pygame.display.flip()
-            clock.tick(30)  # 30 FPS
+            clock.tick(30)
 
-        # Record metrics
         episode_rewards.append(episode_reward)
         average_rewards.append(np.mean(episode_rewards[-100:]))
         epsilon_history.append(agent.epsilon)
-        water_usage_history.append(episode_water_usage)  # Record total water usage for the episode
-        if losses:
-            loss_history.append(np.mean(losses))
-        else:
-            loss_history.append(0)
+        water_usage_history.append(episode_water_usage)
+        loss_history.append(np.mean(losses) if losses else 0)
 
-        # Update plots every 10 episodes
+        # Save training metrics after each episode
+        training_data = pd.DataFrame([{
+            'Episode': episode,
+            'Reward': episode_reward,
+            'Average_Reward': np.mean(episode_rewards[-100:]),
+            'Epsilon': agent.epsilon,
+            'Loss': np.mean(losses) if losses else 0,
+            'Water_Usage': episode_water_usage
+        }])
+        training_data.to_csv('training_results.csv', mode='a', header=False, index=False)
+
+        # Save weather predictions and actions data after each episode
+        weather_actions_df = pd.DataFrame(weather_actions_data)
+        weather_actions_df.to_csv('weather_actions.csv', mode='a', header=False, index=False)
+
         if episode % 10 == 0:
             ax1.clear()
             ax1.plot(episode_rewards, label='Episode Reward')
@@ -132,22 +159,11 @@ def train_agent(episodes=1000, max_steps=25, seed=42):
             plt.tight_layout()
             plt.pause(0.01)
 
-    # Save training data
-    training_data = pd.DataFrame({
-        'Episode': range(episodes),
-        'Reward': episode_rewards,
-        'Average_Reward': average_rewards,
-        'Epsilon': epsilon_history,
-        'Loss': loss_history,
-        'Water_Usage': water_usage_history  # Include water usage in saved data
-    })
-    training_data.to_csv('training_results.csv', index=False)
-
     pygame.quit()
-    return agent, training_data
+    return agent, pd.DataFrame(episode_rewards, columns=['Rewards'])
 
 
-def test_agent(agent, episodes=10):
+def test_agent(agent, episodes=3):
     """Test the trained agent"""
     pygame.init()
     screen = pygame.display.set_mode((800, 600))
@@ -177,7 +193,7 @@ def test_agent(agent, episodes=10):
                 action_idx = q_values.argmax().item()
                 action = np.array([agent.action_map[action_idx]])
 
-            next_state, reward = env.step(action)
+            next_state, reward, water_usage = env.step(action)
             episode_reward += reward
 
             # Render
@@ -205,8 +221,8 @@ def test_agent(agent, episodes=10):
 
 if __name__ == "__main__":
     # Train the agent
-    trained_agent, training_data = train_agent(episodes=1000)
+    trained_agent, training_data = train_agent(episodes=750)
 
     # Test the trained agent
-    average_test_reward = test_agent(trained_agent)
+    # average_test_reward = test_agent(trained_agent)
     # print(f"\nAverage Test Reward: {average_test_reward:.2f}")

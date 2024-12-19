@@ -48,16 +48,16 @@ class PlantEnv:
 
         weather_effect = self.get_weather_effect()
         if weather_effect == 'Sunny':
-            self.water = max(self.water - 1, 0)
+            self.water = max(self.water - 1.5, 0)
         elif weather_effect == 'Cloudy':
             self.health = max(self.health - 0.5, 0)
         elif weather_effect == 'Rainy':
-            self.health = max(self.health + 0.5, 0)
+            self.health = max(self.health + 1, 0)
 
         # Health decrease for too much or too little water
-        if self.water > 7:  # Too much water
+        if self.water > 6.5:  # Too much water
             self.health = max(self.health - 0.5, 0)
-        elif self.water < 3:  # Too little water
+        elif self.water < 3.5:  # Too little water
             self.health = max(self.health - 0.5, 0)
         elif 4.5 < self.water < 5.5:
             self.health = max(self.health + 1, 0)
@@ -93,7 +93,6 @@ class PlantEnv:
 
     def get_state(self):
         # Include moisture level, water, and arrays for current and predicted weather
-        print("p:", self.predicted_weather)
         state = np.array([
             self.moisture_level,
             self.water,
@@ -109,8 +108,6 @@ class PlantEnv:
 
     def get_weather_effect(self):
         # For simplicity, take the first weather condition as the current weather effect
-        print("c:", self.current_weather)
-        print("-")
         return self.current_weather[0]
 
 # Example usage
